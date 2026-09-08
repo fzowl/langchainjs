@@ -7,6 +7,21 @@ import { chunkArray } from "@langchain/core/utils/chunk_array";
  * parameters specific to the VoyageEmbeddings class.
  */
 export interface VoyageEmbeddingsParams extends EmbeddingsParams {
+  /**
+   * The VoyageAI by MongoDB embedding model to use.
+   *
+   * Currently available models (see https://docs.voyageai.com/docs/embeddings):
+   * - `voyage-4-large` — best general-purpose & multilingual retrieval quality.
+   * - `voyage-4` — general-purpose & multilingual retrieval.
+   * - `voyage-4-lite` — optimized for latency and cost.
+   * - `voyage-4-nano` — open-weight, available on Hugging Face.
+   * - `voyage-code-4` — optimized for code retrieval and coding agents.
+   * - `voyage-finance-2` — optimized for finance retrieval and RAG.
+   * - `voyage-law-2` — optimized for legal retrieval and RAG.
+   *
+   * For contextualized chunk embeddings use `voyage-context-4` with
+   * {@link VoyageEmbeddings.contextualizedEmbed}.
+   */
   modelName: string;
 
   /**
@@ -94,12 +109,110 @@ export interface CreateVoyageEmbeddingRequest {
 }
 
 /**
- * The shape of a successful response from the Voyage AI embeddings endpoint.
+ * The shape of a successful response from the VoyageAI by MongoDB embeddings
+ * endpoint.
  * @see https://docs.voyageai.com/reference/embeddings-api
  */
 interface VoyageEmbeddingResponse {
   object: "list";
   data: Array<{ object: "embedding"; embedding: number[]; index: number }>;
+  model: string;
+  usage: { total_tokens: number };
+}
+
+/**
+ * Options for a contextualized chunk embeddings request.
+ * @see https://docs.voyageai.com/docs/contextualized-chunk-embeddings
+ */
+export interface ContextualizedEmbedOptions {
+  /**
+   * The contextualized model to use, e.g. `voyage-context-4`.
+   * Defaults to the instance `modelName`.
+   */
+  model?: string;
+
+  /**
+   * Input type for the embeddings request. One of `document` or `query`.
+   * Required to be `document` when {@link enableAutoChunking} is enabled.
+   */
+  inputType?: string;
+
+  /**
+   * The desired dimension of the output embeddings.
+   */
+  outputDimension?: number;
+
+  /**
+   * The data type of the output embeddings.
+   */
+  outputDtype?: string;
+
+  /**
+   * The format of the output embeddings.
+   */
+  encodingFormat?: string;
+
+  /**
+   * Whether the API should automatically chunk the inputs. Requires a flat
+   * `string[]` input and `inputType` set to `document`.
+   */
+  enableAutoChunking?: boolean;
+
+  /**
+   * Target chunk size (in tokens) when auto chunking is enabled.
+   */
+  chunkSize?: number;
+
+  /**
+   * Overlap (in tokens) between consecutive chunks when auto chunking is
+   * enabled. Must be smaller than {@link chunkSize}.
+   */
+  chunkOverlap?: number;
+}
+
+/**
+ * Interface for the request body sent to the contextualized embeddings
+ * endpoint.
+ * @see https://docs.voyageai.com/docs/contextualized-chunk-embeddings
+ */
+export interface CreateVoyageContextualizedEmbeddingRequest {
+  model: string;
+
+  /**
+   * Input texts to vectorize. Per the official spec both a flat list of
+   * strings (`string[]`) and a list of lists of strings (`string[][]`) are
+   * supported.
+   */
+  inputs: string[] | string[][];
+
+  input_type?: string;
+
+  output_dimension?: number;
+
+  output_dtype?: string;
+
+  encoding_format?: string;
+
+  enable_auto_chunking?: boolean;
+
+  chunk_size?: number;
+
+  chunk_overlap?: number;
+}
+
+/**
+ * The shape of a successful response from the VoyageAI by MongoDB
+ * contextualized embeddings endpoint. Each top-level `data` entry corresponds
+ * to one input document and holds the per-chunk embeddings for that document.
+ * @see https://docs.voyageai.com/reference/contextualized-embeddings-api
+ */
+interface VoyageContextualizedEmbeddingResponse {
+  object: "list";
+  data: Array<{
+    object: "list";
+    data: Array<{ object: "embedding"; embedding: number[]; index: number }>;
+    index: number;
+  }>;
   model: string;
   usage: { total_tokens: number };
 }
@@ -122,7 +235,7 @@ function extractErrorMessage(body: unknown): string {
 }
 
 /**
- * A class for generating embeddings using the Voyage AI API.
+ * A class for generating embeddings using the VoyageAI by MongoDB API.
  */
 export class VoyageEmbeddings
   extends Embeddings
@@ -138,6 +251,8 @@ export class VoyageEmbeddings
   basePath?: string = "https://api.voyageai.com/v1";
 
   apiUrl: string;
+
+  contextualizedApiUrl: string;
 
   headers?: Record<string, string>;
 
@@ -181,6 +296,7 @@ export class VoyageEmbeddings
     this.apiKey = apiKey;
     this.basePath = fieldsWithDefaults?.basePath ?? this.basePath;
     this.apiUrl = `${this.basePath}/embeddings`;
+    this.contextualizedApiUrl = `${this.basePath}/contextualizedembeddings`;
     this.inputType = fieldsWithDefaults?.inputType;
     this.truncation = fieldsWithDefaults?.truncation;
     this.outputDimension = fieldsWithDefaults?.outputDimension;
@@ -243,15 +359,76 @@ export class VoyageEmbeddings
   }
 
   /**
-   * Makes a request to the Voyage AI API to generate embeddings for an array of texts.
+   * Generates contextualized chunk embeddings for one or more documents.
+   *
+   * Per the official specification the `inputs` parameter accepts both
+   * `string[]` (a flat list of texts) and `string[][]` (a list of documents,
+   * each already split into chunks) — both formats are supported.
+   *
+   * The returned value mirrors the input structure: one entry per input
+   * document, each holding the ordered per-chunk embeddings for that document.
+   *
+   * @param inputs - Texts to embed, as `string[]` or `string[][]`.
+   * @param options - Optional per-request configuration (model, input type,
+   * auto chunking, etc.). Use a contextualized model such as `voyage-context-4`.
+   * @returns A Promise resolving to per-document arrays of per-chunk embeddings.
+   * @see https://docs.voyageai.com/docs/contextualized-chunk-embeddings
+   */
+  async contextualizedEmbed(
+    inputs: string[] | string[][],
+    options?: ContextualizedEmbedOptions
+  ): Promise<number[][][]> {
+    const { data } = await this.contextualizedEmbeddingWithRetry({
+      model: options?.model ?? this.modelName,
+      inputs,
+      input_type: options?.inputType ?? this.inputType,
+      output_dimension: options?.outputDimension ?? this.outputDimension,
+      output_dtype: options?.outputDtype ?? this.outputDtype,
+      encoding_format: options?.encodingFormat ?? this.encodingFormat,
+      enable_auto_chunking: options?.enableAutoChunking,
+      chunk_size: options?.chunkSize,
+      chunk_overlap: options?.chunkOverlap,
+    });
+
+    return [...data]
+      .sort((a, b) => a.index - b.index)
+      .map((doc) =>
+        [...doc.data].sort((a, b) => a.index - b.index).map((c) => c.embedding)
+      );
+  }
+
+  /**
+   * Makes a request to the VoyageAI by MongoDB API to generate embeddings for
+   * an array of texts.
    * @param request - An object with properties to configure the request.
-   * @returns A Promise that resolves to the response from the Voyage AI API.
+   * @returns A Promise that resolves to the response from the API.
    */
   private async embeddingWithRetry(
     request: CreateVoyageEmbeddingRequest
   ): Promise<VoyageEmbeddingResponse> {
+    return this.postJson<VoyageEmbeddingResponse>(this.apiUrl, request);
+  }
+
+  /**
+   * Makes a request to the VoyageAI by MongoDB contextualized embeddings API.
+   * @param request - An object with properties to configure the request.
+   * @returns A Promise that resolves to the response from the API.
+   */
+  private async contextualizedEmbeddingWithRetry(
+    request: CreateVoyageContextualizedEmbeddingRequest
+  ): Promise<VoyageContextualizedEmbeddingResponse> {
+    return this.postJson<VoyageContextualizedEmbeddingResponse>(
+      this.contextualizedApiUrl,
+      request
+    );
+  }
+
+  /**
+   * POSTs a JSON body to the given VoyageAI by MongoDB endpoint through the
+   * retrying `AsyncCaller`, returning the parsed response.
+   */
+  private async postJson<T>(url: string, request: unknown): Promise<T> {
     const makeCompletionRequest = async () => {
-      const url = `${this.apiUrl}`;
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -282,7 +459,7 @@ export class VoyageEmbeddings
         throw err;
       }
 
-      return json as VoyageEmbeddingResponse;
+      return json as T;
     };
 
     return this.caller.call(makeCompletionRequest);

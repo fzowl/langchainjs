@@ -17,6 +17,28 @@ function mockFetchResponse(embeddings: number[][]): Response {
   } as unknown as Response;
 }
 
+// Builds a contextualized embeddings response: one inner list per document,
+// each holding `embedding` objects for that document's chunks.
+function mockContextualizedResponse(docs: number[][][]): Response {
+  return {
+    ok: true,
+    json: async () => ({
+      object: "list",
+      data: docs.map((chunks, docIndex) => ({
+        object: "list",
+        data: chunks.map((embedding, index) => ({
+          object: "embedding",
+          embedding,
+          index,
+        })),
+        index: docIndex,
+      })),
+      model: "voyage-context-4",
+      usage: { total_tokens: 10 },
+    }),
+  } as unknown as Response;
+}
+
 function mockFetchError(status: number, body: unknown): Response {
   return {
     ok: false,
@@ -176,6 +198,123 @@ describe("VoyageEmbeddings.embedDocuments", () => {
     expect(result).toHaveLength(10);
     expect(result[0]).toEqual([0, 0]);
     expect(result[8]).toEqual([8, 0]);
+  });
+});
+
+describe("VoyageEmbeddings.contextualizedEmbed", () => {
+  it("posts to the contextualizedembeddings endpoint", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockContextualizedResponse([[[0.1, 0.2]]]));
+
+    const embeddings = new VoyageEmbeddings({ modelName: "voyage-context-4" });
+    await embeddings.contextualizedEmbed(["hello"]);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://api.voyageai.com/v1/contextualizedembeddings"
+    );
+  });
+
+  it("accepts a flat string[] input and returns nested embeddings", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockContextualizedResponse([[[1, 0]], [[0, 1]]]));
+
+    const embeddings = new VoyageEmbeddings({ modelName: "voyage-context-4" });
+    const result = await embeddings.contextualizedEmbed(["doc a", "doc b"], {
+      inputType: "document",
+    });
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string
+    );
+    expect(body.inputs).toEqual(["doc a", "doc b"]);
+    expect(body.model).toBe("voyage-context-4");
+    expect(body.input_type).toBe("document");
+    expect(result).toEqual([[[1, 0]], [[0, 1]]]);
+  });
+
+  it("accepts a nested string[][] input", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      mockContextualizedResponse([
+        [
+          [1, 0],
+          [0, 1],
+        ],
+      ])
+    );
+
+    const embeddings = new VoyageEmbeddings({ modelName: "voyage-context-4" });
+    const result = await embeddings.contextualizedEmbed([
+      ["chunk one", "chunk two"],
+    ]);
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string
+    );
+    expect(body.inputs).toEqual([["chunk one", "chunk two"]]);
+    expect(result).toEqual([
+      [
+        [1, 0],
+        [0, 1],
+      ],
+    ]);
+  });
+
+  it("orders documents and chunks by their index", async () => {
+    // Return documents and chunks out of order; contextualizedEmbed must sort.
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        object: "list",
+        data: [
+          {
+            object: "list",
+            index: 1,
+            data: [{ object: "embedding", embedding: [9], index: 0 }],
+          },
+          {
+            object: "list",
+            index: 0,
+            data: [
+              { object: "embedding", embedding: [2], index: 1 },
+              { object: "embedding", embedding: [1], index: 0 },
+            ],
+          },
+        ],
+        model: "voyage-context-4",
+        usage: { total_tokens: 5 },
+      }),
+    } as unknown as Response);
+
+    const embeddings = new VoyageEmbeddings({ modelName: "voyage-context-4" });
+    const result = await embeddings.contextualizedEmbed([["a", "b"], ["c"]]);
+
+    expect(result).toEqual([[[1], [2]], [[9]]]);
+  });
+
+  it("forwards auto chunking options and model override", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockContextualizedResponse([[[0.1]]]));
+
+    const embeddings = new VoyageEmbeddings({ modelName: "voyage-3" });
+    await embeddings.contextualizedEmbed(["long doc"], {
+      model: "voyage-context-4",
+      inputType: "document",
+      enableAutoChunking: true,
+      chunkSize: 512,
+      chunkOverlap: 0,
+    });
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string
+    );
+    expect(body.model).toBe("voyage-context-4");
+    expect(body.enable_auto_chunking).toBe(true);
+    expect(body.chunk_size).toBe(512);
+    expect(body.chunk_overlap).toBe(0);
   });
 });
 
