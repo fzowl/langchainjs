@@ -88,17 +88,15 @@ describe("VoyageContextualizedEmbeddings constructor", () => {
 
 describe("VoyageContextualizedEmbeddings.contextualizedEmbed", () => {
   it("calls contextualized_embed with a flat list[str] input, auto-chunking and chunk_size 32000", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        mockFetchResponse([
-          [
-            [1, 0],
-            [0, 1],
-          ],
-          [[0.5, 0.5]],
-        ])
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      mockFetchResponse([
+        [
+          [1, 0],
+          [0, 1],
+        ],
+        [[0.5, 0.5]],
+      ])
+    );
 
     const embeddings = new VoyageContextualizedEmbeddings();
     const result = await embeddings.contextualizedEmbed([
