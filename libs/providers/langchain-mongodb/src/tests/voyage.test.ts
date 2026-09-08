@@ -119,6 +119,20 @@ describe("VoyageEmbeddings.embedQuery", () => {
     expect(body.input).toBe("hello world");
   });
 
+  it("passes the configured model through to the request", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockFetchResponse([[0.1]]));
+
+    const embeddings = new VoyageEmbeddings({ modelName: "voyage-code-4" });
+    await embeddings.embedQuery("test");
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string
+    );
+    expect(body.model).toBe("voyage-code-4");
+  });
+
   it("sends Authorization header with API key", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       mockFetchResponse([[0.1]])

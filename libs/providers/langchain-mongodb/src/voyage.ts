@@ -7,10 +7,21 @@ import { chunkArray } from "@langchain/core/utils/chunk_array";
  * parameters specific to the VoyageEmbeddings class.
  */
 export interface VoyageEmbeddingsParams extends EmbeddingsParams {
+  /**
+   * The VoyageAI by MongoDB embedding model to use.
+   *
+   * Currently available models (see https://docs.voyageai.com/docs/embeddings):
+   * - General-purpose / multilingual: `voyage-4-large` (recommended),
+   *   `voyage-4`, `voyage-4-lite`
+   * - Code: `voyage-code-4`
+   * - Domain-specific: `voyage-finance-2`, `voyage-law-2`
+   * - Legacy (still available): `voyage-3.5`, `voyage-3-large`, `voyage-code-3`,
+   *   `voyage-3`
+   */
   modelName: string;
 
   /**
-   * Base URL for Voyage API requests.
+   * Base URL for VoyageAI by MongoDB API requests.
    * If your API key was created on the MongoDB Atlas UI, it should look like `'https://ai.mongodb.com/v1'`.
    * If your API key was created on the Voyage AI Dashboard, it should look like `'https://api.voyageai.com/v1'`.
    * @default "https://api.voyageai.com/v1"
@@ -20,7 +31,7 @@ export interface VoyageEmbeddingsParams extends EmbeddingsParams {
 
   /**
    * The maximum number of documents to embed in a single request. This is
-   * limited by the Voyage AI API to a maximum of 8.
+   * limited by the VoyageAI by MongoDB API to a maximum of 8.
    */
   batchSize?: number;
 
@@ -94,7 +105,7 @@ export interface CreateVoyageEmbeddingRequest {
 }
 
 /**
- * The shape of a successful response from the Voyage AI embeddings endpoint.
+ * The shape of a successful response from the VoyageAI by MongoDB embeddings endpoint.
  * @see https://docs.voyageai.com/reference/embeddings-api
  */
 interface VoyageEmbeddingResponse {
@@ -122,7 +133,11 @@ function extractErrorMessage(body: unknown): string {
 }
 
 /**
- * A class for generating embeddings using the Voyage AI API.
+ * A class for generating embeddings using the VoyageAI by MongoDB
+ * (Voyage AI) embeddings API.
+ *
+ * For contextualized chunk embeddings (`voyage-context-4`) use
+ * {@link VoyageContextualizedEmbeddings} instead.
  */
 export class VoyageEmbeddings
   extends Embeddings
@@ -243,9 +258,9 @@ export class VoyageEmbeddings
   }
 
   /**
-   * Makes a request to the Voyage AI API to generate embeddings for an array of texts.
+   * Makes a request to the VoyageAI by MongoDB API to generate embeddings for an array of texts.
    * @param request - An object with properties to configure the request.
-   * @returns A Promise that resolves to the response from the Voyage AI API.
+   * @returns A Promise that resolves to the response from the VoyageAI by MongoDB API.
    */
   private async embeddingWithRetry(
     request: CreateVoyageEmbeddingRequest

@@ -36,6 +36,56 @@ You can do so by adding appropriate field to your project's `package.json` like 
 
 The field you need depends on the package manager you're using, but we recommend adding a field for the common `yarn`, `npm`, and `pnpm` to maximize compatibility.
 
+## VoyageAI by MongoDB embeddings
+
+This package ships the [VoyageAI by MongoDB](https://docs.voyageai.com/) embedding
+models. Set your API key via the `VOYAGE_API_KEY` (or `VOYAGEAI_API_KEY`)
+environment variable, or pass it as the `apiKey` option.
+
+```typescript
+import { VoyageEmbeddings } from "@langchain/mongodb";
+
+const embeddings = new VoyageEmbeddings({ modelName: "voyage-4-large" });
+const vector = await embeddings.embedQuery("What is a vector store?");
+```
+
+### Available models
+
+The full, up-to-date list lives at
+[docs.voyageai.com/docs/embeddings](https://docs.voyageai.com/docs/embeddings).
+Currently available models include:
+
+- **General-purpose / multilingual:** `voyage-4-large` (recommended), `voyage-4`, `voyage-4-lite`
+- **Code:** `voyage-code-4`
+- **Domain-specific:** `voyage-finance-2`, `voyage-law-2`
+- **Contextualized chunk embeddings:** `voyage-context-4` (see below)
+- **Legacy (still available):** `voyage-3.5`, `voyage-3-large`, `voyage-code-3`, `voyage-3`
+
+If your API key was created in the MongoDB Atlas UI, point `basePath` at the
+MongoDB endpoint: `new VoyageEmbeddings({ basePath: "https://ai.mongodb.com/v1" })`.
+
+### Contextualized chunk embeddings
+
+`VoyageContextualizedEmbeddings` (`voyage-context-4`) embeds each chunk of a
+document in the context of the other chunks from the same document. It relies on
+server-side auto-chunking: each document is sent as a single string in a flat
+`list[str]` input with `enable_auto_chunking: true` and a configurable
+`chunkSize` (default `32000` tokens).
+
+```typescript
+import { VoyageContextualizedEmbeddings } from "@langchain/mongodb";
+
+const embeddings = new VoyageContextualizedEmbeddings({
+  modelName: "voyage-context-4",
+});
+
+// One embedding per chunk, grouped per document.
+const grouped = await embeddings.contextualizedEmbed([
+  "The full text of document one...",
+  "The full text of document two...",
+]);
+```
+
 ## Development
 
 To develop the MongoDB package, you'll need to follow these instructions:
