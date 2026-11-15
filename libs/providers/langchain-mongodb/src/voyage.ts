@@ -1,26 +1,49 @@
 import { getEnvironmentVariable } from "@langchain/core/utils/env";
 import { Embeddings, type EmbeddingsParams } from "@langchain/core/embeddings";
 import { chunkArray } from "@langchain/core/utils/chunk_array";
+import {
+  extractErrorMessage,
+  getDefaultVoyageBaseUrl,
+} from "./voyage_utils.js";
 
 /**
  * Interface that extends EmbeddingsParams and defines additional
  * parameters specific to the VoyageEmbeddings class.
  */
 export interface VoyageEmbeddingsParams extends EmbeddingsParams {
+  /**
+   * The Voyage AI by MongoDB embedding model to use. Current models (default
+   * dimension 1024, Matryoshka `outputDimension` 2048/1024/512/256):
+   * - `voyage-4-large`, `voyage-4`, `voyage-4-lite`: general-purpose, 32K
+   *   token context.
+   * - `voyage-code-4`: code retrieval, 32K token context.
+   * - `voyage-finance-2` (32K) and `voyage-law-2` (16K): domain-specific,
+   *   fixed 1024 dimensions.
+   *
+   * Earlier models such as `voyage-3.5`, `voyage-3.5-lite`, `voyage-3-large`,
+   * `voyage-code-3` and `voyage-3` remain available. For contextualized chunk
+   * embeddings (`voyage-context-4`) see `VoyageContextualizedEmbeddings`.
+   * @see https://docs.voyageai.com/docs/embeddings
+   */
   modelName: string;
 
   /**
-   * Base URL for Voyage API requests.
-   * If your API key was created on the MongoDB Atlas UI, it should look like `'https://ai.mongodb.com/v1'`.
-   * If your API key was created on the Voyage AI Dashboard, it should look like `'https://api.voyageai.com/v1'`.
-   * @default "https://api.voyageai.com/v1"
+   * Base URL for Voyage API requests. When not set, it is chosen from the API
+   * key: keys starting with `al-` (created in the MongoDB Atlas UI) use
+   * `'https://ai.mongodb.com/v1'`, all other keys (created on the Voyage AI
+   * Dashboard) use `'https://api.voyageai.com/v1'`. A value passed here always
+   * takes precedence.
    * @see https://www.mongodb.com/docs/voyageai/management/api-keys/?client-curl-default=curl#create-an-api-key
    */
   basePath?: string;
 
   /**
-   * The maximum number of documents to embed in a single request. This is
-   * limited by the Voyage AI API to a maximum of 8.
+   * The maximum number of documents to embed in a single request. The Voyage
+   * AI API accepts up to 1000 inputs per request, and also caps the total
+   * number of tokens per request (1M for the `-lite` models, 320K for
+   * `voyage-4` and `voyage-3.5`, 120K for the others), so keep this value
+   * small enough for your document sizes.
+   * @default 8
    */
   batchSize?: number;
 
@@ -104,25 +127,8 @@ interface VoyageEmbeddingResponse {
   usage: { total_tokens: number };
 }
 
-function extractErrorMessage(body: unknown): string {
-  if (typeof body === "object" && body !== null) {
-    const b = body as Record<string, unknown>;
-    if (typeof b.detail === "string") return b.detail;
-    const err = b.error;
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      typeof (err as Record<string, unknown>).message === "string"
-    ) {
-      return (err as Record<string, unknown>).message as string;
-    }
-    return JSON.stringify(body);
-  }
-  return `Unknown error: ${String(body)}`;
-}
-
 /**
- * A class for generating embeddings using the Voyage AI API.
+ * A class for generating embeddings using the Voyage AI by MongoDB API.
  */
 export class VoyageEmbeddings
   extends Embeddings
@@ -135,7 +141,7 @@ export class VoyageEmbeddings
   private apiKey: string;
 
   /** Do not modify directly. Pass in the basePath option to the constructor. */
-  basePath?: string = "https://api.voyageai.com/v1";
+  basePath?: string;
 
   apiUrl: string;
 
@@ -179,7 +185,8 @@ export class VoyageEmbeddings
     this.modelName = fieldsWithDefaults?.modelName ?? this.modelName;
     this.batchSize = fieldsWithDefaults?.batchSize ?? this.batchSize;
     this.apiKey = apiKey;
-    this.basePath = fieldsWithDefaults?.basePath ?? this.basePath;
+    this.basePath =
+      fieldsWithDefaults?.basePath ?? getDefaultVoyageBaseUrl(apiKey);
     this.apiUrl = `${this.basePath}/embeddings`;
     this.inputType = fieldsWithDefaults?.inputType;
     this.truncation = fieldsWithDefaults?.truncation;
@@ -243,7 +250,7 @@ export class VoyageEmbeddings
   }
 
   /**
-   * Makes a request to the Voyage AI API to generate embeddings for an array of texts.
+   * Makes a request to the Voyage AI by MongoDB API to generate embeddings for an array of texts.
    * @param request - An object with properties to configure the request.
    * @returns A Promise that resolves to the response from the Voyage AI API.
    */

@@ -78,6 +78,24 @@ describe("VoyageEmbeddings constructor", () => {
     expect(embeddings.basePath).toBe("https://api.voyageai.com/v1");
   });
 
+  it("defaults basePath to the MongoDB AI endpoint for al- keys", () => {
+    const embeddings = new VoyageEmbeddings({
+      modelName: "voyage-3",
+      apiKey: "al-test-key",
+    });
+    expect(embeddings.basePath).toBe("https://ai.mongodb.com/v1");
+    expect(embeddings.apiUrl).toBe("https://ai.mongodb.com/v1/embeddings");
+  });
+
+  it("explicit basePath wins over the key-based default", () => {
+    const embeddings = new VoyageEmbeddings({
+      modelName: "voyage-3",
+      apiKey: "al-test-key",
+      basePath: "https://api.voyageai.com/v1",
+    });
+    expect(embeddings.basePath).toBe("https://api.voyageai.com/v1");
+  });
+
   it("accepts a custom basePath for MongoDB Atlas keys", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")

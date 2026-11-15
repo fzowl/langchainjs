@@ -36,6 +36,35 @@ You can do so by adding appropriate field to your project's `package.json` like 
 
 The field you need depends on the package manager you're using, but we recommend adding a field for the common `yarn`, `npm`, and `pnpm` to maximize compatibility.
 
+## Voyage AI by MongoDB embeddings
+
+`VoyageEmbeddings` and `VoyageContextualizedEmbeddings` use the Voyage AI by MongoDB API. The API key is read from `VOYAGE_API_KEY` (or passed as `apiKey`). Keys starting with `al-` (created in the MongoDB Atlas UI) use `https://ai.mongodb.com/v1`; all other keys use `https://api.voyageai.com/v1`. A `basePath` option always takes precedence.
+
+```typescript
+import {
+  VoyageEmbeddings,
+  VoyageContextualizedEmbeddings,
+} from "@langchain/mongodb";
+
+// Text embeddings: voyage-4-large, voyage-4, voyage-4-lite, voyage-code-4,
+// voyage-finance-2, voyage-law-2 (older models such as voyage-3.5 also work).
+const embeddings = new VoyageEmbeddings({
+  modelName: "voyage-4-lite",
+  outputDimension: 512, // optional: 2048, 1024, 512 or 256 (Matryoshka models)
+});
+const vector = await embeddings.embedQuery("What is Atlas Vector Search?");
+
+// Contextualized chunk embeddings: each document is chunked by the API and
+// every chunk is embedded in the context of the whole document.
+const contextualized = new VoyageContextualizedEmbeddings({
+  modelName: "voyage-context-4",
+});
+const [doc] = await contextualized.contextualizedEmbed([
+  "Full text of a long document...",
+]);
+console.log(doc.chunks, doc.embeddings);
+```
+
 ## Development
 
 To develop the MongoDB package, you'll need to follow these instructions:
